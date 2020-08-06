@@ -3,17 +3,18 @@
 
 OUTPUT_FORMAT("elf32-i386", "elf32-i386", "elf32-i386")
 OUTPUT_ARCH(i386)
-ENTRY(kern_init)
+ENTRY(kern_init)     //入口地址
 
 SECTIONS {
 	/* Load the kernel at this address: "." means the current address */
-	. = 0x100000;
+	. = 0x100000;        // 0x100000开始是内核段
 
 	.text : {
 		*(.text .stub .text.* .gnu.linkonce.t.*)
-	}
+	}   // * 是含有该后缀的全部包含
 
 	PROVIDE(etext = .);	/* Define the 'etext' symbol to this value */
+	//在目标文件内被引用，但没有在任何目标文件内被定义的符号
 
 	.rodata : {
 		*(.rodata .rodata.* .gnu.linkonce.r.*)
@@ -54,5 +55,6 @@ SECTIONS {
 
 	/DISCARD/ : {
 		*(.eh_frame .note.GNU-stack)
+		//被该section引用的任何输入section将不会出现在输出文件内
 	}
 }
