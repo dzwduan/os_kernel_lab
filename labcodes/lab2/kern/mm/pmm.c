@@ -31,8 +31,9 @@
  * */
 static struct taskstate ts = {0};
 
-// virtual address of physicall page array
-struct Page *pages;
+// virtual address of physicall page array ?
+// 管理物理页数组起始地址
+struct Page *pages; 
 // amount of physical memory (in pages)
 size_t npage = 0;
 
@@ -189,7 +190,9 @@ nr_free_pages(void) {
 /* pmm_init - initialize the physical memory management */
 static void
 page_init(void) {
+    //memmap的起始虚拟地址
     struct e820map *memmap = (struct e820map *)(0x8000 + KERNBASE);
+    //?
     uint64_t maxpa = 0;
 
     cprintf("e820map:\n");
@@ -198,16 +201,18 @@ page_init(void) {
         uint64_t begin = memmap->map[i].addr, end = begin + memmap->map[i].size;
         cprintf("  memory: %08llx, [%08llx, %08llx], type = %d.\n",
                 memmap->map[i].size, begin, end - 1, memmap->map[i].type);
+        //???
         if (memmap->map[i].type == E820_ARM) {
             if (maxpa < end && begin < KMEMSIZE) {
                 maxpa = end;
             }
         }
     }
+    // the maximum amount of physical memory
     if (maxpa > KMEMSIZE) {
         maxpa = KMEMSIZE;
     }
-
+    //链接脚本中规定，在.bss后面
     extern char end[];
 
     npage = maxpa / PGSIZE;
@@ -316,7 +321,11 @@ pmm_init(void) {
     print_pgdir();
 
 }
-
+/*
+开启了页机制后，所有程序指令都是以逻辑地址(虚拟地址)的形式工作的，
+像指针、数组访问时等都必须是虚拟地址才能正确的工作(例如使用KADDR宏进行转换)。
+而页表/页目录表中的存放的物理页面基址映射都是物理地址。
+*/
 //get_pte - get pte and return the kernel virtual address of this pte for la
 //        - if the PT contians this pte didn't exist, alloc a page for PT
 // parameter:
@@ -324,6 +333,7 @@ pmm_init(void) {
 //  la:     the linear address need to map
 //  create: a logical value to decide if alloc a page for PT
 // return vaule: the kernel virtual address of this pte
+//给定一个虚拟地址，找出这个虚拟地址在二级页表中对应的项
 pte_t *
 get_pte(pde_t *pgdir, uintptr_t la, bool create) {
     /* LAB2 EXERCISE 2: YOUR CODE
@@ -359,6 +369,29 @@ get_pte(pde_t *pgdir, uintptr_t la, bool create) {
     }
     return NULL;          // (8) return page table entry
 #endif
+    //根据la得到对应的页目录项的物理地址
+    pde_t* pdep = &pgdir[PDX(la)];
+    //如果不存在该项
+    if(!(*pdep& PTE_P)){
+        if(create){
+            struct Page* page = alloc_page();
+            //分配失败
+            if(!page) return NULL;
+            set_page_ref(page,1);
+           
+            uintptr_t pa = page2pa(page);
+            memset(KADDR(pa),0,PGSIZE);
+            //pdep里面存的是物理地址
+            *pdep = pa | PTE_U | PTE_W | PTE_P;
+        }
+        //不允许分配
+        else return NULL;
+    }
+    //*pdep中页目录表项中存放了对应二级页表的一个物理地址
+    //但是开启分页之后使用 都是虚拟地址，要转换
+    //return (pte_t *)pdep[PTX(la)];
+    return &((pte_t *)KADDR(PDE_ADDR(*pdep)))[PTX(la)];
+   
 }
 
 //get_page - get related Page struct for linear address la using PDT pgdir
@@ -404,6 +437,14 @@ page_remove_pte(pde_t *pgdir, uintptr_t la, pte_t *ptep) {
                                   //(6) flush tlb
     }
 #endif
+    if(*ptep & PTE_P) {
+        struct Page * page = pte2page(*ptep);
+        if(page_ref_dec(page)==0)
+            free_page(page);
+        *ptep = 0;
+        tlb_invalidate(pgdir, la);
+    }
+    
 }
 
 //page_remove - free an Page which is related linear address la and has an validated pte
@@ -423,6 +464,7 @@ page_remove(pde_t *pgdir, uintptr_t la) {
 //  perm:  the permission of this Page which is setted in related pte
 // return value: always 0
 //note: PT is changed, so the TLB need to be invalidate 
+//物理页映射到虚拟页
 int
 page_insert(pde_t *pgdir, struct Page *page, uintptr_t la, uint32_t perm) {
     pte_t *ptep = get_pte(pgdir, la, 1);

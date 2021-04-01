@@ -82,12 +82,14 @@ typedef uintptr_t pde_t;
 #define E820_ARM            1       // address range memory
 #define E820_ARR            2       // address range reserved
 
+//位于物理地址0x8000
+//在0x8000地址处保存了从BIOS中获得的内存分布信息
 struct e820map {
-    int nr_map;
+    int nr_map;  //map中元素个数
     struct {
-        uint64_t addr;
-        uint64_t size;
-        uint32_t type;
+        uint64_t addr; //内存块基地址
+        uint64_t size; //内存大小
+        uint32_t type; //内存类型
     } __attribute__((packed)) map[E820MAX];
 };
 
@@ -96,9 +98,14 @@ struct e820map {
  * physical page. In kern/mm/pmm.h, you can find lots of useful functions
  * that convert Page to other data types, such as phyical address.
  * */
+//page记录的是每个物理页的属性
+//page_link是用于链接Page结构的双向链表
 struct Page {
+    //被页表的引用记数
     int ref;                        // page frame's reference counter
+    //0保留，1可分配
     uint32_t flags;                 // array of flags that describe the status of the page frame
+    //连续空闲块大小,是head page
     unsigned int property;          // the num of free block, used in first fit pm manager
     list_entry_t page_link;         // free list link
 };
@@ -118,6 +125,7 @@ struct Page {
 #define le2page(le, member)                 \
     to_struct((le), struct Page, member)
 
+//所有的连续内存空闲块可用一个双向链表管理
 /* free_area_t - maintains a doubly linked list to record free (unused) pages */
 typedef struct {
     list_entry_t free_list;         // the list header

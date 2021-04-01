@@ -48,16 +48,16 @@ probe_memory:
     xorl %ebx, %ebx
     movw $0x8004, %di
 start_probe:
-    movl $0xE820, %eax            ;eax功能号
-    movl $20, %ecx                ;ecx写入的字节数
-    movl $SMAP, %edx              ;magic num
-    int $0x15                     ;0x15中断
+    movl $0xE820, %eax
+    movl $20, %ecx
+    movl $SMAP, %edx
+    int $0x15
     jnc cont
     movw $12345, 0x8000
     jmp finish_probe
 cont:
-    addw $20, %di                  ;es:di缓冲区地址
-    incl 0x8000                    ;
+    addw $20, %di
+    incl 0x8000
     cmpl $0, %ebx
     jnz start_probe
 finish_probe:

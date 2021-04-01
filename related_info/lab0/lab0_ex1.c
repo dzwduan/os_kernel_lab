@@ -11,4 +11,7 @@ void main()
 	: "c" (count), "a" (value) , "D" (buf[0])
 	:
       );
+      //cld CLears the Direction flag, data goes onwards
+      //rep 
+      //stosl 将value写到buf
 }

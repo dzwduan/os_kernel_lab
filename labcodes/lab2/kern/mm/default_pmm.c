@@ -93,32 +93,50 @@
  *      Try to merge blocks at lower or higher addresses. Notice: This should
  *  change some pages' `p->property` correctly.
  */
+
+//管理空闲块
 free_area_t free_area;
 
 #define free_list (free_area.free_list)
 #define nr_free (free_area.nr_free)
 
+//初始化free_area
 static void
 default_init(void) {
     list_init(&free_list);
     nr_free = 0;
 }
 
+//根据某个连续地址的空闲块的起始页，页个数来建立一个连续内存空闲块的双向链表
+//把空闲物理页对应的Page结构中的flags和引用计数ref清零，
+//并加到free_area.free_list指向的双向列表中，
+//为将来的空闲页管理做好初始化准备工作
 static void
 default_init_memmap(struct Page *base, size_t n) {
     assert(n > 0);
     struct Page *p = base;
+    //这里将连续n个页都置为占用状态，这样就只能使用base进行操作
     for (; p != base + n; p ++) {
+        //p必须是被占用状态??
         assert(PageReserved(p));
+        //p被保留并且p的空闲块数为0
         p->flags = p->property = 0;
+        //p的引用计数为0
         set_page_ref(p, 0);
     }
+    //设置base为头并且空闲块数+n,新增的base加入到free_list之后
     base->property = n;
+    //设置为头
     SetPageProperty(base);
     nr_free += n;
-    list_add(&free_list, &(base->page_link));
+    //这里为什么没有根据地址插入?
+    //这里有一个假定page_init函数是按地址从小到大的顺序传来的连续内存空闲块的
+    //链表头是free_area.free_list，链表项是Page数据结构的base->page_link
+    //依靠Page数据结构中的成员变量page_link形成了连续内存空闲块列表。
+    list_add_before(&free_list, &(base->page_link));
 }
 
+//从空闲链表中分配n个页
 static struct Page *
 default_alloc_pages(size_t n) {
     assert(n > 0);
@@ -127,55 +145,82 @@ default_alloc_pages(size_t n) {
     }
     struct Page *page = NULL;
     list_entry_t *le = &free_list;
+    //从空闲链表头开始查找最小的地址
     while ((le = list_next(le)) != &free_list) {
+        //由链表元素获得对应的Page指针p
         struct Page *p = le2page(le, page_link);
+        //满足大小，则返回page
         if (p->property >= n) {
             page = p;
             break;
         }
     }
+    //找到了一个page
     if (page != NULL) {
-        list_del(&(page->page_link));
+        
         if (page->property > n) {
+            //p是后面要接上的地址，page要删除
             struct Page *p = page + n;
             p->property = page->property - n;
-            list_add(&free_list, &(p->page_link));
-    }
+            // xxx -> page -> p
+            SetPageProperty(p);
+            list_add(&(page->page_link), &(p->page_link)); //??
+        }
+        // xxx -> p
+        list_del(&(page->page_link)); 
         nr_free -= n;
         ClearPageProperty(page);
     }
     return page;
 }
 
+//释放从base开始连续的n页添加到free_list
 static void
 default_free_pages(struct Page *base, size_t n) {
     assert(n > 0);
     struct Page *p = base;
     for (; p != base + n; p ++) {
+        //将连续n页都置为不可用状态
         assert(!PageReserved(p) && !PageProperty(p));
         p->flags = 0;
         set_page_ref(p, 0);
     }
+    //设置base为头结点
     base->property = n;
     SetPageProperty(base);
     list_entry_t *le = list_next(&free_list);
     while (le != &free_list) {
+        //le转换到页结构p
         p = le2page(le, page_link);
-        le = list_next(le);
+        //base后面紧跟p
         if (base + base->property == p) {
             base->property += p->property;
             ClearPageProperty(p);
             list_del(&(p->page_link));
         }
+        //p后面紧跟base
         else if (p + p->property == base) {
             p->property += base->property;
             ClearPageProperty(base);
             base = p;
             list_del(&(p->page_link));
         }
+        le = list_next(le);
     }
     nr_free += n;
-    list_add(&free_list, &(base->page_link));
+    //list_add(&free_list, &(base->page_link));
+
+    //根据地址值找到插入的位置
+    le = list_next(&free_list);
+    while(le!=&free_list){
+        p = le2page(le,page_link);
+        while(base+base->property<=p){
+            assert(base+base->property!=p); //如果相等那么是上面没有合并好
+            break;
+        }
+        le = list_next(le);
+    }
+    list_add_before(le,&(base->page_link));
 }
 
 static size_t
