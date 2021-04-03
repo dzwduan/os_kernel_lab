@@ -182,7 +182,7 @@ default_free_pages(struct Page *base, size_t n) {
     for (; p != base + n; p ++) {
         //将连续n页都置为不可用状态
         assert(!PageReserved(p) && !PageProperty(p));
-        p->flags = 0;
+        p->flags = 0; //reserved
         set_page_ref(p, 0);
     }
     //设置base为头结点

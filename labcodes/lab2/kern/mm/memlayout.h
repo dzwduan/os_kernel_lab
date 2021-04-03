@@ -132,6 +132,14 @@ typedef struct {
     unsigned int nr_free;           // # of free pages in this free list
 } free_area_t;
 
+#define MAX_ORDER 11
+
+//这里的buddy
+typedef struct {
+    list_entry_t free_area[MAX_ORDER]; 
+    unsigned long nr_free;
+}buddy_free_area_t;
+
 #endif /* !__ASSEMBLER__ */
 
 #endif /* !__KERN_MM_MEMLAYOUT_H__ */
