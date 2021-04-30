@@ -372,6 +372,28 @@ get_pte(pde_t *pgdir, uintptr_t la, bool create) {
     }
     return NULL;          // (8) return page table entry
 #endif
+    //找到页目录表项的地址
+    pde_t *pdep = &pgdir[PDX(la)];
+    if (!(*pdep & PTE_P)) {
+        struct Page *page;
+        if (!create || (page = alloc_page()) == NULL) {
+            return NULL;
+        }
+        set_page_ref(page, 1);
+        uintptr_t pa = page2pa(page);
+        memset(KADDR(pa), 0, PGSIZE);
+        *pdep = pa | PTE_U | PTE_W | PTE_P;
+    }
+    //返回二级表项的地址,所以&
+    //return pdep[PTX(la)];
+    //  定位二级页表
+    //      目前状态: 找到了此虚拟地址的一级页表项,且保证二级页表项是存在的.
+    //      *pdep: 一级页表项内容
+    //      PDE_ADDR(*pdep): 一级页表项内容中的物理地址部分(高 20位)
+    //      KADDR(PDE_ADDR(*pdep)): 一级页表项内容中的物理地址对应的内核虚拟地址,即二级页表基址
+    //      KADDR(PDE_ADDR(*pdep))[PTX(la)] 基于二级页表基址,用PTX(la)作为索引值,定位到二级页表项
+    //      最后&取二级页表项地址.
+    return &((pte_t *)KADDR(PDE_ADDR(*pdep)))[PTX(la)];
 }
 
 //get_page - get related Page struct for linear address la using PDT pgdir
@@ -417,6 +439,14 @@ page_remove_pte(pde_t *pgdir, uintptr_t la, pte_t *ptep) {
                                   //(6) flush tlb
     }
 #endif
+    if(*ptep & PTE_P){
+        struct Page * page = pte2page(*ptep);
+        if(page_ref_dec(page)==0) free_page(page);
+        //清空第二个页表项
+        //memset(page,0,PGSIZE);
+        *ptep = 0;
+        tlb_invalidate(pgdir, la);
+    }
 }
 
 //page_remove - free an Page which is related linear address la and has an validated pte

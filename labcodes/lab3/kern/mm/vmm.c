@@ -48,7 +48,7 @@ mm_create(void) {
         mm->mmap_cache = NULL;
         mm->pgdir = NULL;
         mm->map_count = 0;
-
+        //TODO
         if (swap_init_ok) swap_init_mm(mm);
         else mm->sm_priv = NULL;
     }
@@ -74,10 +74,13 @@ struct vma_struct *
 find_vma(struct mm_struct *mm, uintptr_t addr) {
     struct vma_struct *vma = NULL;
     if (mm != NULL) {
+        //先用缓存
         vma = mm->mmap_cache;
+        //如果addr不在vma区域内
         if (!(vma != NULL && vma->vm_start <= addr && vma->vm_end > addr)) {
                 bool found = 0;
                 list_entry_t *list = &(mm->mmap_list), *le = list;
+                //遍历mm_struct中的vma_struct
                 while ((le = list_next(le)) != list) {
                     vma = le2vma(le, list_link);
                     if (vma->vm_start<=addr && addr < vma->vm_end) {
@@ -85,10 +88,12 @@ find_vma(struct mm_struct *mm, uintptr_t addr) {
                         break;
                     }
                 }
+                //如果直到遍历完vma区域都没找到,ret NULL
                 if (!found) {
                     vma = NULL;
                 }
         }
+        //更新缓存
         if (vma != NULL) {
             mm->mmap_cache = vma;
         }
@@ -111,17 +116,23 @@ void
 insert_vma_struct(struct mm_struct *mm, struct vma_struct *vma) {
     assert(vma->vm_start < vma->vm_end);
     list_entry_t *list = &(mm->mmap_list);
+    //le_prev从mmap_list起始位置开始
     list_entry_t *le_prev = list, *le_next;
-
+        //le和le_prev起始位置一样
         list_entry_t *le = list;
+        //遍历mm_struct里面的vma
         while ((le = list_next(le)) != list) {
+            //le实际从mm->mmap_list下一个开始
             struct vma_struct *mmap_prev = le2vma(le, list_link);
+            //找到第一个比vma起始地址大的区域
             if (mmap_prev->vm_start > vma->vm_start) {
                 break;
             }
+            //le_prev保存插入之前的一个节点
             le_prev = le;
         }
 
+    //需要插入的vma区域，实际遍历完成之后，节点应该插入在le_prev~le_next
     le_next = list_next(le_prev);
 
     /* check overlap */
@@ -141,10 +152,12 @@ insert_vma_struct(struct mm_struct *mm, struct vma_struct *vma) {
 // mm_destroy - free mm and mm internal fields
 void
 mm_destroy(struct mm_struct *mm) {
-
+    //从mm_struct起始vma开始遍历
     list_entry_t *list = &(mm->mmap_list), *le;
     while ((le = list_next(list)) != list) {
+        //依次删除le
         list_del(le);
+        //按页释放
         kfree(le2vma(le, list_link),sizeof(struct vma_struct));  //kfree vma        
     }
     kfree(mm, sizeof(struct mm_struct)); //kfree mm
@@ -307,6 +320,7 @@ do_pgfault(struct mm_struct *mm, uint32_t error_code, uintptr_t addr) {
     //try to find a vma which include addr
     struct vma_struct *vma = find_vma(mm, addr);
 
+    // TODO
     pgfault_num++;
     //If the addr is in the range of a mm's vma?
     if (vma == NULL || vma->vm_start > addr) {
@@ -364,6 +378,37 @@ do_pgfault(struct mm_struct *mm, uint32_t error_code, uintptr_t addr) {
     *   mm->pgdir : the PDT of these vma
     *
     */
+
+    //EXERCISE1
+    //获取Ptep表项,都需要判空
+    if((ptep = get_pte(mm->pgdir,addr,1))==NULL)
+        goto failed;
+    //如果该表项不存在，则分配物理页
+    if(*ptep==0){
+        if((pgdir_alloc_page(mm->pgdir,addr,perm))==NULL)
+            goto failed;
+    }
+    //物理页帧不在内存中
+    else{
+        //如果可交换
+        if(swap_init_ok){
+            struct Page *page=NULL;
+            //找到需要换入的地址写入page
+            if((ret=swap_in(mm,addr,&page))!=0){
+                cprintf("swap_in in do_pgfault failed\n");
+                goto failed;
+            }
+            //设置地址映射
+            page_insert(mm->pgdir, page, addr, perm);
+            //让该页变为可映射
+            swap_map_swappable(mm,addr,page,1); 
+            //按访问时间排序的链表的虚拟页起始地址
+            page->pra_vaddr = addr; 
+        } else {
+            cprintf("no swap_init_ok but ptep is %x, failed\n",*ptep);
+            goto failed;
+        }
+    }
 #if 0
     /*LAB3 EXERCISE 1: YOUR CODE*/
     ptep = ???              //(1) try to find a pte, if pte's PT(Page Table) isn't existed, then create a PT.
